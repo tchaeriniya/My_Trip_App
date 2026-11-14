@@ -1,0 +1,80 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;color:#191F28;background:#fff}
+#app{display:flex;height:100%;border:1px solid #E5E8EB;border-radius:18px;overflow:hidden}
+#side{width:380px;max-width:45%;display:flex;flex-direction:column;border-right:1px solid #E5E8EB}
+#mapwrap{flex:1;position:relative}#map{position:absolute;inset:0}
+#chips{display:flex;gap:8px;padding:10px 12px;overflow-x:auto;border-bottom:1px solid #E5E8EB;flex-shrink:0}
+.chip{flex-shrink:0;border:0;border-radius:999px;padding:7px 14px;font-weight:700;font-size:13px;background:#F2F4F6;color:#4E5968}
+.chip.on{background:#3182F6;color:#fff}
+#list{flex:1;overflow-y:auto;position:relative;padding:14px 14px 60vh;-webkit-overflow-scrolling:touch}
+.head{margin-bottom:14px}.head b{font-size:20px}.head div{color:#6B7684;font-size:13px;margin-top:4px}
+.head a{display:inline-block;margin-top:8px;font-size:12px;font-weight:700;color:#3182F6;text-decoration:none}
+.card{position:relative;display:flex;gap:12px;padding:14px;margin-bottom:12px;border:1.5px solid #E5E8EB;border-radius:16px;background:#fff;transition:.25s;cursor:pointer}
+.card.on{border-color:#3182F6;box-shadow:0 6px 18px rgba(49,130,246,.18);transform:translateY(-1px)}
+.num{width:28px;height:28px;border-radius:50%;color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.meta{font-size:12px;color:#6B7684;margin-bottom:3px}.name{font-weight:700;font-size:15.5px}
+.addr{font-size:12px;color:#8B95A1;margin-top:2px}.memo{margin-top:8px;padding:8px 10px;background:#F7F8FA;border-radius:10px;font-size:13px;color:#4E5968;white-space:pre-wrap}
+.open{display:inline-block;margin-top:8px;font-size:12px;font-weight:700;color:#3182F6;text-decoration:none}
+.fcard{padding:12px 14px;margin-bottom:12px;border-radius:16px;background:linear-gradient(135deg,#EAF3FF,#F5F9FF);border:1.5px solid #CFE2FF}
+.ft{font-size:12px;font-weight:700;color:#3182F6}.fn{font-weight:800;font-size:16px;margin:2px 0 6px}
+.fr{display:flex;align-items:center;justify-content:space-between;gap:8px}.fr span{display:flex;flex-direction:column;font-size:12px;color:#6B7684}
+.fr b{font-size:18px;color:#191F28}.fr i{color:#3182F6;font-style:normal;font-size:18px}
+.empty{color:#8B95A1;text-align:center;margin-top:40px;font-size:14px}
+.pin{width:30px;height:30px;border-radius:50%;background:var(--c);color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);transition:transform .25s}
+.pin.on{transform:scale(1.4);box-shadow:0 0 0 6px rgba(49,130,246,.25),0 3px 10px rgba(0,0,0,.35)}
+@media(max-width:760px){#app{flex-direction:column}#mapwrap{order:-1;flex:none;height:42%}#side{width:100%;max-width:none;flex:1;min-height:0;border-right:0}}
+</style></head><body>
+<div id="app"><div id="side"><div id="chips"></div><div id="list"></div></div><div id="mapwrap"><div id="map"></div></div></div>
+<script>
+const DATA=__DATA__;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const okUrl=u=>/^https?:\/\//i.test(u)?u:'#';
+const map=L.map('map',{zoomControl:false}).setView([20,0],2);
+L.control.zoom({position:'bottomright'}).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+new ResizeObserver(()=>map.invalidateSize()).observe(document.getElementById('mapwrap'));
+const chips=document.getElementById('chips'),list=document.getElementById('list');
+let cur=0,P=[],markers=[],full,prog,active=-2,cards=[],tick=false;
+const pts=()=>P.filter(p=>p.lat!=null).map(p=>[p.lat,p.lng]);
+function fitAll(anim){const q=pts();if(!q.length)return;
+  if(q.length==1)map.setView(q[0],15,{animate:anim});
+  else map[anim?'flyToBounds':'fitBounds'](L.latLngBounds(q),{padding:[50,50],maxZoom:16,duration:.7});}
+function setActive(a){if(a===active)return;active=a;
+  cards.forEach((c,k)=>c.classList.toggle('on',k==a));
+  markers.forEach((m,k)=>{const e=m&&m.getElement();if(e)e.querySelector('.pin').classList.toggle('on',k==a)});
+  prog.setLatLngs(P.slice(0,a+1).filter(p=>p.lat!=null).map(p=>[p.lat,p.lng]));
+  if(a<0){fitAll(true);return}
+  const p=P[a];if(p.lat!=null)map.flyTo([p.lat,p.lng],15,{duration:.7});}
+function goto(k){list.scrollTo({top:cards[k].offsetTop-list.clientHeight*.2,behavior:'smooth'})}
+const fl=(f,t)=>f?`<div class="fcard"><div class="ft">✈️ ${t}</div><div class="fn">${esc(f.no)}</div><div class="fr"><span>${esc(f.dep)}<b>${esc(f.dep_time)}</b></span><i>→</i><span style="text-align:right">${esc(f.arr)}<b>${esc(f.arr_time)}</b></span></div></div>`:'';
+function render(i){cur=i;const d=DATA[i];P=d.places;active=-2;
+  [...chips.children].forEach((c,k)=>c.classList.toggle('on',k==i));
+  markers.forEach(m=>m&&m.remove());full&&full.remove();prog&&prog.remove();markers=[];cards=[];
+  const q=pts();
+  let dir='';if(q.length>1){const f=a=>a.join(',');const w=q.slice(1,-1).slice(0,9).map(f).join('|');
+    dir=`<a target="_blank" href="https://www.google.com/maps/dir/?api=1&origin=${f(q[0])}&destination=${f(q[q.length-1])}${w?'&waypoints='+encodeURIComponent(w):''}">Google 지도로 전체 경로 보기 →</a>`}
+  let h=`<div class="head"><b>${esc(d.label)}</b><div>${esc(d.date)} · ${P.length}곳</div>${dir}</div>`;
+  h+=fl(d.top,'출국 항공편');
+  if(!P.length)h+='<div class="empty">아직 장소가 없어요<br>‘일정 짜기’에서 추가해 보세요</div>';
+  P.forEach((p,k)=>{h+=`<div class="card" data-k="${k}"><div class="num" style="background:${p.color}">${k+1}</div><div style="min-width:0"><div class="meta">${p.emoji} ${esc(p.cat)}${p.time?' · '+esc(p.time):''}</div><div class="name">${esc(p.name)}</div>${p.address?`<div class="addr">${esc(p.address)}</div>`:''}${p.memo?`<div class="memo">${esc(p.memo)}</div>`:''}<a class="open" target="_blank" href="${okUrl(p.url)}" onclick="event.stopPropagation()">Google 지도에서 열기 →</a></div></div>`});
+  h+=fl(d.bottom,'귀국 항공편');
+  list.innerHTML=h;cards=[...list.querySelectorAll('.card')];
+  cards.forEach((c,k)=>c.onclick=()=>goto(k));
+  P.forEach((p,k)=>{if(p.lat==null){markers.push(null);return}
+    const m=L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:`<div class="pin" style="--c:${p.color}">${k+1}</div>`,iconSize:[30,30],iconAnchor:[15,15]})}).addTo(map);
+    m.on('click',()=>goto(k));markers.push(m)});
+  full=L.polyline(q,{color:'#9AA5B1',weight:4,opacity:.8,dashArray:'6 8'}).addTo(map);
+  prog=L.polyline([],{color:'#3182F6',weight:6,opacity:.95}).addTo(map);
+  list.scrollTop=0;setTimeout(()=>{map.invalidateSize();fitAll(false);active=-1},60);}
+DATA.forEach((d,i)=>{const b=document.createElement('button');b.className='chip';b.textContent=d.label;b.onclick=()=>render(i);chips.appendChild(b)});
+list.addEventListener('scroll',()=>{if(tick)return;tick=true;requestAnimationFrame(()=>{tick=false;
+  const lr=list.getBoundingClientRect(),line=lr.top+lr.height*.3;let a=-1;
+  cards.forEach((c,k)=>{if(c.getBoundingClientRect().top<=line)a=k});
+  if(list.scrollTop<20)a=-1;setActive(a)})});
+render(0);
+</script></body></html>
